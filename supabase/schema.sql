@@ -1,0 +1,11 @@
+create extension if not exists pgcrypto;
+create table public.programs(id uuid primary key default gen_random_uuid(),owner_id uuid not null references auth.users(id) on delete cascade,title text not null,organizer text default 'Pejabat Kesihatan Daerah Kuala Selangor',event_date date,created_at timestamptz default now());
+create table public.certificates(id uuid primary key default gen_random_uuid(),owner_id uuid not null references auth.users(id) on delete cascade,program_id uuid references public.programs(id) on delete cascade,participant_name text not null,participant_email text,certificate_no text not null unique,storage_path text,created_at timestamptz default now());
+alter table public.programs enable row level security; alter table public.certificates enable row level security;
+create policy "owner programs" on public.programs for all to authenticated using(auth.uid()=owner_id) with check(auth.uid()=owner_id);
+create policy "owner certificates" on public.certificates for all to authenticated using(auth.uid()=owner_id) with check(auth.uid()=owner_id);
+insert into storage.buckets(id,name,public) values('certificates','certificates',false) on conflict(id) do nothing;
+create policy "owner upload certificates" on storage.objects for insert to authenticated with check(bucket_id='certificates' and (storage.foldername(name))[1]=auth.uid()::text);
+create policy "owner read certificates" on storage.objects for select to authenticated using(bucket_id='certificates' and (storage.foldername(name))[1]=auth.uid()::text);
+create or replace function public.verify_certificate(code text) returns table(valid boolean,participant_name text,program_title text,certificate_no text,issued_at timestamptz) language sql security definer set search_path=public as $$ select true,c.participant_name,coalesce(p.title,'Program'),c.certificate_no,c.created_at from public.certificates c left join public.programs p on p.id=c.program_id where c.certificate_no=code limit 1 $$;
+revoke all on function public.verify_certificate(text) from public; grant execute on function public.verify_certificate(text) to anon,authenticated;
